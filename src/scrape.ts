@@ -2,7 +2,7 @@
 import { chromium } from "playwright";
 import { loadState, saveState } from "./state";
 import { sendDiscordAlert } from "./discord";
-import { Product, ProductState, StateRecord } from "./types";
+import { Product, StateRecord } from "./types";
 
 const BASE_URL = "https://www.pokemoncenter.com/category/tcg-cards";
 const PAGE_SIZE = 96;
@@ -12,7 +12,7 @@ const MAX_PAGES = 20;
   console.log("🚀 Starting scraper...");
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: false, // headed mode for CI/CD
     args: ["--disable-blink-features=AutomationControlled"],
   });
   console.log("🖥 Chromium launched in headed mode");
@@ -39,8 +39,25 @@ const MAX_PAGES = 20;
     console.log(`🔍 Checking page ${pageNum}: ${url}`);
 
     await page.goto(url, { waitUntil: "networkidle" });
-    console.log("⏳ Page loaded, waiting 2s for lazy content...");
+    console.log("⏳ Page loaded, waiting 2s for scripts to inject...");
     await page.waitForTimeout(2000);
+
+    // Wait until at least one JSON-LD script contains a Product
+    console.log("⏳ Waiting for JSON-LD Product scripts (up to 30s)...");
+    await page.waitForFunction(() => {
+      return Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+        .some(s => {
+          try {
+            const data = JSON.parse(s.textContent || "{}");
+            const items = Array.isArray(data) ? data : [data];
+            return items.some(d => d["@type"] === "Product");
+          } catch {
+            return false;
+          }
+        });
+    }, { timeout: 20000 });
+
+    console.log("✅ JSON-LD Product scripts detected");
 
     const jsonLdHandles = await page.$$(
       'script[type="application/ld+json"]'
@@ -59,9 +76,12 @@ const MAX_PAGES = 20;
 
         for (const item of items) {
           if (item["@type"] === "Product" && item.offers) {
+            const productUrl = item.offers.url || item.url;
+            if (!productUrl) continue;
+
             const product: Product = {
-              name: item.name,
-              url: item.offers.url || item.url,
+              name: item.name || "Unknown Product",
+              url: productUrl,
               inStock:
                 item.offers.availability === "http://schema.org/InStock",
             };
@@ -90,7 +110,6 @@ const MAX_PAGES = 20;
         console.log(`ℹ️ ${product.name}: ${product.inStock ? "In Stock" : "Sold Out"}`);
       }
 
-      // Save only ProductState (url is key)
       newState[product.url] = {
         name: product.name,
         inStock: product.inStock,
