@@ -1,21 +1,22 @@
-// src/scrape.ts
 import { chromium } from "playwright";
 import { loadState, saveState } from "./state";
 import { sendDiscordAlert } from "./discord";
-import { Product, StateRecord } from "./types";
+import { Product } from "./types";
 
 const BASE_URL = "https://www.pokemoncenter.com/category/tcg-cards";
 const PAGE_SIZE = 96;
 const MAX_PAGES = 20;
+const SCROLL_WAIT = 5000; // 5s wait after scrolling
 
 (async () => {
   console.log("🚀 Starting scraper...");
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: false, // headed for debugging
+    slowMo: 100,     // slow actions for visual debugging
     args: ["--disable-blink-features=AutomationControlled"],
   });
-  console.log("🖥 Chromium launched in headed mode");
+  console.log("🖥 Chromium launched");
 
   const context = await browser.newContext({
     userAgent:
@@ -24,27 +25,30 @@ const MAX_PAGES = 20;
     locale: "en-US",
     timezoneId: "America/New_York",
   });
-  console.log("🌐 Browser context created");
-
   const page = await context.newPage();
-  console.log("📄 New page opened");
+  console.log("🌐 Browser context created, new page opened");
 
-  const previousState: StateRecord = await loadState();
-  console.log("💾 Previous state loaded:", Object.keys(previousState).length, "items");
-
-  const newState: StateRecord = { ...previousState };
+  const previousState = await loadState();
+  console.log("💾 Loaded previous state:", Object.keys(previousState).length, "items");
+  const newState: Record<string, Product> = { ...previousState };
 
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
     const url = `${BASE_URL}?ps=${PAGE_SIZE}&page=${pageNum}`;
     console.log(`🔍 Checking page ${pageNum}: ${url}`);
 
     await page.goto(url, { waitUntil: "networkidle" });
-    console.log("⏳ Page loaded, waiting 5s for JSON-LD scripts...");
-    await page.waitForTimeout(5000); // wait for scripts to load
+    console.log("⏳ Page loaded, waiting 2s for initial content...");
+    await page.waitForTimeout(2000);
 
-    const jsonLdHandles = await page.$$(
-      'script[type="application/ld+json"]'
-    );
+    // Scroll to bottom to trigger lazy content
+    await page.evaluate(async () => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    console.log(`⏳ Scrolled page, waiting ${SCROLL_WAIT / 1000}s for lazy-loaded JSON-LD...`);
+    await page.waitForTimeout(SCROLL_WAIT);
+
+    // Grab JSON-LD scripts
+    const jsonLdHandles = await page.$$('script[type="application/ld+json"]');
     console.log(`📄 Found ${jsonLdHandles.length} JSON-LD scripts`);
 
     const products: Product[] = [];
@@ -59,14 +63,10 @@ const MAX_PAGES = 20;
 
         for (const item of items) {
           if (item["@type"] === "Product" && item.offers) {
-            const productUrl = item.offers.url || item.url;
-            if (!productUrl) continue;
-
             const product: Product = {
-              name: item.name || "Unknown Product",
-              url: productUrl,
-              inStock:
-                item.offers.availability === "http://schema.org/InStock",
+              name: item.name,
+              url: item.offers.url || item.url,
+              inStock: item.offers.availability === "http://schema.org/InStock",
             };
             products.push(product);
           }
@@ -79,7 +79,7 @@ const MAX_PAGES = 20;
     console.log(`📦 Found ${products.length} products on page ${pageNum}`);
 
     if (products.length === 0) {
-      console.log("✅ No more products found, stopping.");
+      console.log("✅ No products found, stopping.");
       break;
     }
 
@@ -93,10 +93,7 @@ const MAX_PAGES = 20;
         console.log(`ℹ️ ${product.name}: ${product.inStock ? "In Stock" : "Sold Out"}`);
       }
 
-      newState[product.url] = {
-        name: product.name,
-        inStock: product.inStock,
-      };
+      newState[product.url] = product;
     }
   }
 
