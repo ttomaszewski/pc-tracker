@@ -8,10 +8,13 @@ const PAGE_SIZE = 96;
 const MAX_PAGES = 20;
 
 (async () => {
+  console.log("🚀 Starting scraper...");
+
   const browser = await chromium.launch({
     headless: false,
     args: ["--disable-blink-features=AutomationControlled"],
   });
+  console.log("🖥 Chromium launched in headed mode");
 
   const context = await browser.newContext({
     userAgent:
@@ -20,23 +23,28 @@ const MAX_PAGES = 20;
     locale: "en-US",
     timezoneId: "America/New_York",
   });
+  console.log("🌐 Browser context created");
 
   const page = await context.newPage();
+  console.log("📄 New page opened");
 
   const previousState = await loadState();
-  const newState = { ...previousState };
+  console.log("💾 Previous state loaded:", Object.keys(previousState).length, "items");
+
+  const newState: Record<string, Product> = { ...previousState };
 
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
     const url = `${BASE_URL}?ps=${PAGE_SIZE}&page=${pageNum}`;
-    console.log(`🔍 Checking page ${pageNum}`);
+    console.log(`🔍 Checking page ${pageNum}: ${url}`);
 
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(2000); // human-like delay
+    console.log("⏳ Page loaded, waiting 2s for lazy content...");
+    await page.waitForTimeout(2000);
 
-    // Grab all JSON-LD scripts with product info
     const jsonLdHandles = await page.$$(
       'script[type="application/ld+json"]'
     );
+    console.log(`📄 Found ${jsonLdHandles.length} JSON-LD scripts`);
 
     let products: Product[] = [];
 
@@ -46,8 +54,6 @@ const MAX_PAGES = 20;
 
       try {
         const data = JSON.parse(text);
-
-        // Sometimes JSON-LD is an array, sometimes a single object
         const items = Array.isArray(data) ? data : [data];
 
         for (const item of items) {
@@ -56,16 +62,17 @@ const MAX_PAGES = 20;
               name: item.name,
               url: item.offers.url || item.url,
               inStock:
-                item.offers.availability ===
-                "http://schema.org/InStock",
+                item.offers.availability === "http://schema.org/InStock",
             };
             products.push(product);
           }
         }
       } catch (e) {
-        // ignore invalid JSON
+        console.log("⚠️ Failed to parse JSON-LD:", e);
       }
     }
+
+    console.log(`📦 Found ${products.length} products on page ${pageNum}`);
 
     if (products.length === 0) {
       console.log("✅ No more products found, stopping.");
@@ -75,10 +82,11 @@ const MAX_PAGES = 20;
     for (const product of products) {
       const prev = previousState[product.url];
 
-      // SOLD OUT → IN STOCK
       if (prev && !prev.inStock && product.inStock) {
-        console.log(`🟢 ALERT: ${product.name}`);
+        console.log(`🟢 ALERT: ${product.name} is back in stock!`);
         await sendDiscordAlert(product);
+      } else {
+        console.log(`ℹ️ ${product.name}: ${product.inStock ? "In Stock" : "Sold Out"}`);
       }
 
       newState[product.url] = {
@@ -89,5 +97,8 @@ const MAX_PAGES = 20;
   }
 
   await saveState(newState);
+  console.log("💾 State saved:", Object.keys(newState).length, "products");
+
   await browser.close();
+  console.log("🛑 Browser closed, scraper finished");
 })();
