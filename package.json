@@ -6,6 +6,7 @@
     "start": "ts-node src/scrape.ts"
   },
   "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
     "@types/node": "^20.10.0",
     "playwright": "^1.41.0",
     "ts-node": "^10.9.2",
