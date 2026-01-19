@@ -1,7 +1,8 @@
+// src/scrape.ts
 import { chromium } from "playwright";
 import { loadState, saveState } from "./state";
 import { sendDiscordAlert } from "./discord";
-import { Product } from "./types";
+import { Product, ProductState, StateRecord } from "./types";
 
 const BASE_URL = "https://www.pokemoncenter.com/category/tcg-cards";
 const PAGE_SIZE = 96;
@@ -11,7 +12,7 @@ const MAX_PAGES = 20;
   console.log("🚀 Starting scraper...");
 
   const browser = await chromium.launch({
-    headless: false, // headed mode for bot evasion
+    headless: false,
     args: ["--disable-blink-features=AutomationControlled"],
   });
   console.log("🖥 Chromium launched in headed mode");
@@ -28,10 +29,10 @@ const MAX_PAGES = 20;
   const page = await context.newPage();
   console.log("📄 New page opened");
 
-  const previousState: Record<string, Product> = await loadState();
+  const previousState: StateRecord = await loadState();
   console.log("💾 Previous state loaded:", Object.keys(previousState).length, "items");
 
-  const newState: Record<string, Product> = { ...previousState };
+  const newState: StateRecord = { ...previousState };
 
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
     const url = `${BASE_URL}?ps=${PAGE_SIZE}&page=${pageNum}`;
@@ -60,7 +61,7 @@ const MAX_PAGES = 20;
           if (item["@type"] === "Product" && item.offers) {
             const product: Product = {
               name: item.name,
-              url: item.offers.url || item.url, // must include url
+              url: item.offers.url || item.url,
               inStock:
                 item.offers.availability === "http://schema.org/InStock",
             };
@@ -89,10 +90,9 @@ const MAX_PAGES = 20;
         console.log(`ℹ️ ${product.name}: ${product.inStock ? "In Stock" : "Sold Out"}`);
       }
 
-      // Save full Product object to satisfy TypeScript
+      // Save only ProductState (url is key)
       newState[product.url] = {
         name: product.name,
-        url: product.url,
         inStock: product.inStock,
       };
     }
