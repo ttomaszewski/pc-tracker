@@ -1,24 +1,24 @@
 import fs from "fs";
-import path from "path";
-import { StateRecord } from "./types";
+import { ProductState } from "./types";
 
-const STATE_FILE = path.resolve(__dirname, "state.json");
+const STATE_FILE = "./state.json";
 
-export async function loadState(): Promise<StateRecord> {
-  if (!fs.existsSync(STATE_FILE)) return {};
+export async function loadState(): Promise<ProductState> {
   try {
-    const raw = await fs.promises.readFile(STATE_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch (e) {
-    console.warn("⚠️ Failed to parse state.json, starting fresh");
+    if (!fs.existsSync(STATE_FILE)) return {};
+    const data = await fs.promises.readFile(STATE_FILE, "utf-8");
+    return JSON.parse(data) as ProductState;
+  } catch (err) {
+    console.log("⚠️ Failed to load state:", err);
     return {};
   }
 }
 
-export async function saveState(state: StateRecord) {
-  await fs.promises.writeFile(
-    STATE_FILE,
-    JSON.stringify(state, null, 2),
-    "utf-8"
-  );
+export async function saveState(state: ProductState): Promise<void> {
+  try {
+    await fs.promises.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+    console.log("💾 State saved to", STATE_FILE);
+  } catch (err) {
+    console.log("⚠️ Failed to save state:", err);
+  }
 }

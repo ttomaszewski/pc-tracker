@@ -5,8 +5,8 @@ export type Product = {
 };
 
 export type ProductState = {
-  name: string;
-  inStock: boolean;
+  [url: string]: {
+    name: string;
+    inStock: boolean;
+  };
 };
-
-export type StateRecord = Record<string, ProductState>;

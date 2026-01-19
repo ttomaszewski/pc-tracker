@@ -1,23 +1,21 @@
 import { chromium } from "playwright";
 import { loadState, saveState } from "./state";
 import { sendDiscordAlert } from "./discord";
-import { Product } from "./types";
+import { Product, ProductState } from "./types";
 
 const BASE_URL = "https://www.pokemoncenter.com/category/tcg-cards";
 const PAGE_SIZE = 96;
 const MAX_PAGES = 20;
-const SCROLL_WAIT = 5000; // 5s wait after scrolling
+const SCROLL_WAIT = 5000; // ms
 
 (async () => {
   console.log("🚀 Starting scraper...");
 
   const browser = await chromium.launch({
-    headless: false, // headed for debugging
-    slowMo: 100,     // slow actions for visual debugging
+    headless: false,
+    slowMo: 100,
     args: ["--disable-blink-features=AutomationControlled"],
   });
-  console.log("🖥 Chromium launched");
-
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -26,11 +24,17 @@ const SCROLL_WAIT = 5000; // 5s wait after scrolling
     timezoneId: "America/New_York",
   });
   const page = await context.newPage();
-  console.log("🌐 Browser context created, new page opened");
+  console.log("🖥 Browser launched and page opened");
 
   const previousState = await loadState();
-  console.log("💾 Loaded previous state:", Object.keys(previousState).length, "items");
-  const newState: Record<string, Product> = { ...previousState };
+  console.log("💾 Previous state loaded:", Object.keys(previousState).length, "items");
+
+  // Convert ProductState -> Record<string, Product>
+  const newState: Record<string, Product> = {};
+  for (const url in previousState) {
+    const item = previousState[url];
+    newState[url] = { ...item, url };
+  }
 
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
     const url = `${BASE_URL}?ps=${PAGE_SIZE}&page=${pageNum}`;
@@ -40,14 +44,11 @@ const SCROLL_WAIT = 5000; // 5s wait after scrolling
     console.log("⏳ Page loaded, waiting 2s for initial content...");
     await page.waitForTimeout(2000);
 
-    // Scroll to bottom to trigger lazy content
-    await page.evaluate(async () => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
-    console.log(`⏳ Scrolled page, waiting ${SCROLL_WAIT / 1000}s for lazy-loaded JSON-LD...`);
+    // Scroll to bottom to trigger lazy loading
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    console.log(`⏳ Scrolled page, waiting ${SCROLL_WAIT / 1000}s for JSON-LD scripts...`);
     await page.waitForTimeout(SCROLL_WAIT);
 
-    // Grab JSON-LD scripts
     const jsonLdHandles = await page.$$('script[type="application/ld+json"]');
     console.log(`📄 Found ${jsonLdHandles.length} JSON-LD scripts`);
 
@@ -93,13 +94,17 @@ const SCROLL_WAIT = 5000; // 5s wait after scrolling
         console.log(`ℹ️ ${product.name}: ${product.inStock ? "In Stock" : "Sold Out"}`);
       }
 
-      newState[product.url] = product;
+      newState[product.url] = product; // already includes url
     }
   }
 
-  await saveState(newState);
-  console.log("💾 State saved:", Object.keys(newState).length, "products");
+  await saveState(
+    Object.fromEntries(
+      Object.values(newState).map(p => [p.url, { name: p.name, inStock: p.inStock }])
+    )
+  );
 
+  console.log("🛑 Browser closing...");
   await browser.close();
-  console.log("🛑 Browser closed, scraper finished");
+  console.log("✅ Scraper finished");
 })();
