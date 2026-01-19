@@ -91,6 +91,7 @@ const MAX_PAGES = 20;
 
       newState[product.url] = {
         name: product.name,
+        url: product.url,
         inStock: product.inStock,
       };
     }
