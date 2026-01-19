@@ -5,12 +5,25 @@ import { Product } from "./types";
 
 const BASE_URL =
   "https://www.pokemoncenter.com/category/tcg-cards";
+
 const PAGE_SIZE = 96;
 const MAX_PAGES = 20;
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const browser = await chromium.launch({
+    headless: false, // IMPORTANT: avoids bot detection
+    args: ["--disable-blink-features=AutomationControlled"]
+  });
+
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 800 },
+    locale: "en-US",
+    timezoneId: "America/New_York"
+  });
+
+  const page = await context.newPage();
 
   const previousState = await loadState();
   const newState = { ...previousState };
@@ -19,8 +32,21 @@ const MAX_PAGES = 20;
     const url = `${BASE_URL}?ps=${PAGE_SIZE}&page=${pageNum}`;
     console.log(`🔍 Checking page ${pageNum}`);
 
-    await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(2000);
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+
+    // Human-like delay (critical)
+    await page.waitForTimeout(3000);
+    await page.mouse.move(200, 200);
+
+    // Detect verification page
+    const verificationDetected =
+      (await page.locator("text=verifying").count()) > 0 ||
+      (await page.locator("text=verify").count()) > 0;
+
+    if (verificationDetected) {
+      console.log("⚠️ Verification page detected, waiting...");
+      await page.waitForTimeout(10000);
+    }
 
     const products: Product[] = await page.$$eval(
       'a[href*="/product/"]',
@@ -63,6 +89,7 @@ const MAX_PAGES = 20;
     for (const product of products) {
       const prev = previousState[product.url];
 
+      // SOLD OUT → IN STOCK
       if (prev && !prev.inStock && product.inStock) {
         console.log(`🟢 ALERT: ${product.name}`);
         await sendDiscordAlert(product);
