@@ -12,7 +12,7 @@ const MAX_PAGES = 20;
   console.log("🚀 Starting scraper...");
 
   const browser = await chromium.launch({
-    headless: false, // headed mode for CI/CD
+    headless: false,
     args: ["--disable-blink-features=AutomationControlled"],
   });
   console.log("🖥 Chromium launched in headed mode");
@@ -39,32 +39,15 @@ const MAX_PAGES = 20;
     console.log(`🔍 Checking page ${pageNum}: ${url}`);
 
     await page.goto(url, { waitUntil: "networkidle" });
-    console.log("⏳ Page loaded, waiting 2s for scripts to inject...");
-    await page.waitForTimeout(2000);
-
-    // Wait until at least one JSON-LD script contains a Product
-    console.log("⏳ Waiting for JSON-LD Product scripts (up to 30s)...");
-    await page.waitForFunction(() => {
-      return Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
-        .some(s => {
-          try {
-            const data = JSON.parse(s.textContent || "{}");
-            const items = Array.isArray(data) ? data : [data];
-            return items.some(d => d["@type"] === "Product");
-          } catch {
-            return false;
-          }
-        });
-    }, { timeout: 20000 });
-
-    console.log("✅ JSON-LD Product scripts detected");
+    console.log("⏳ Page loaded, waiting 5s for JSON-LD scripts...");
+    await page.waitForTimeout(5000); // wait for scripts to load
 
     const jsonLdHandles = await page.$$(
       'script[type="application/ld+json"]'
     );
     console.log(`📄 Found ${jsonLdHandles.length} JSON-LD scripts`);
 
-    let products: Product[] = [];
+    const products: Product[] = [];
 
     for (const handle of jsonLdHandles) {
       const text = await handle.textContent();
